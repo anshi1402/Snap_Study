@@ -20,7 +20,12 @@ def send_study_email(
     )
 
     message["To"] = recipient_email
-    message["Subject"] = subject
+    safe_subject = " ".join(
+    subject.replace("\r", " ")
+          .replace("\n", " ")
+          .split())
+
+    message["Subject"] = safe_subject[:150]
 
     # Plain text email
     plain_text = study_content

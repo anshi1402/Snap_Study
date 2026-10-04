@@ -1,4 +1,5 @@
 import streamlit as st 
+import time
 import json
 from email_service import send_study_email 
 from google import genai 
@@ -44,15 +45,23 @@ def add_message(role,kind,content):
     render_message(st.session_state.messages[-1])
 
 
-def ask_gemini(parts):
-    try:
-        response = (st.session_state.chat.send_message(parts))
-        return response.text
-    except Exception as error:
-        return (
-            "Sorry, something went wrong while "
-            f"processing your request:\n\n{error}"
-        )
+def ask_gemini(parts, retries=3):
+    last_error = None
+    for attempt in range(retries):
+        try:
+            response = st.session_state.chat.send_message(parts)
+            if response and response.text:
+                return response.text
+            raise Exception("Gemini returned an empty response.")
+        except Exception as error:
+            last_error = error
+            error_text = str(error)
+            if "503" in error_text or "UNAVAILABLE" in error_text:
+                if attempt < retries - 1:
+                    time.sleep(2 ** attempt)
+                    continue
+            break
+    raise RuntimeError(f"Gemini request failed after {retries} attempts: {last_error}")
 
 
 def generate_complete_study_note():
@@ -117,38 +126,45 @@ with header_col:
 
 with button_col:
     send_disabled = (len(st.session_state.messages) <= 1)
-    if st.button(
-        "📧 Send Explanation",
-        disabled=send_disabled,
-        use_container_width=True):
+    if st.button("📧 Send Explanation",disabled=send_disabled,use_container_width=True):
+        try:
+            with st.spinner("🧠 Preparing your complete study note..."):
+                study_note = generate_complete_study_note()
+        except Exception as error:
+            error_text = str(error)
+            if ("503" in error_text or "UNAVAILABLE" in error_text):
+                st.error(
+                "🤖 Gemini is temporarily experiencing "
+                "high demand. Please wait a few seconds "
+                "and try again.")
+            else:
+                st.error(
+                f"❌ Could not generate the study note: "
+                f"{error_text}")
+    st.stop()
+    
+email_subject = (
+        f"📚 Snap & Study - Study Notes for "
+        f"{st.session_state.name}")
 
-        with st.spinner("🧠 Preparing your complete study note..."):
-            study_note = (generate_complete_study_note())
+with st.spinner("📧 Sending your study note..."):
+   success, info = send_study_email(recipient_email=(st.session_state.student_email),
+            subject=email_subject,
+            study_content=study_note,
+            sender_email=EMAIL_SENDER,
+            sender_password=EMAIL_APP_PASSWORD,
+            sender_name=EMAIL_SENDER_NAME,
+        )
 
-        with st.spinner("📝 Preparing your email..."):
-            email_subject = (generate_email_subject(study_note))
-
-        with st.spinner("📧 Sending your study note..."):
-
-            success, info = (
-                send_study_email(
-                    recipient_email=(
-                        st.session_state.student_email
-                    ),
-                    subject=email_subject,
-                    study_content=study_note,
-                    sender_email=EMAIL_SENDER,
-                    sender_password=EMAIL_APP_PASSWORD,
-                    sender_name=EMAIL_SENDER_NAME,
-                )
-            )
-
-        if success:
-            st.success(
-                "✅ Complete study explanation "
-                "sent to your email!")
-        else:
-            st.error(f"❌ Couldn't send the email: {info}")
+if success:
+    st.success(
+            "✅ Complete study explanation "
+            "sent to your email!"
+        )
+else:
+    st.error(
+            f"❌ Couldn't send the email: {info}"
+        )
 st.caption(
     f"👤 {st.session_state.name}  •  "
     f"📧 {st.session_state.student_email}"
