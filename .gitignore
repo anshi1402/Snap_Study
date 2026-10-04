@@ -1,0 +1,9 @@
+.streamlit/secrets.toml 
+snap & study_secrets.txt 
+.env
+.env.*
+__pycache__/
+*.pyc
+.venv/
+venv/
+.vscode/
